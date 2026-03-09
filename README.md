@@ -95,9 +95,9 @@ node server.js
 3. **Access the dashboard:**
 ```http://localhost:3000/dashboard.html```
 
+## Usage
 
-# Usage- Admin can view, approve, or reject events through the dashboard.
-
-- Event cards dynamically display images and details (fetched from backend).
-- Users can submit events via forms, which are processed and stored by the backend.
+- Admin can view, approve, or reject events through the dashboard.  
+- Event cards dynamically display images and details (fetched from backend).  
+- Users can submit events via forms, which are processed and stored by the backend.  
 - Frontend forms include validation to ensure correct input.
