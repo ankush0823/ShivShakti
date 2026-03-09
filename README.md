@@ -97,6 +97,7 @@ node server.js
 
 
 # Usage- Admin can view, approve, or reject events through the dashboard.
+
 - Event cards dynamically display images and details (fetched from backend).
 - Users can submit events via forms, which are processed and stored by the backend.
 - Frontend forms include validation to ensure correct input.
