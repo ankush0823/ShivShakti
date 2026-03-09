@@ -15,9 +15,7 @@
 4. [Folder Structure](#folder-structure)  
 5. [Installation & Setup](#installation--setup)  
 6. [Running the Application](#running-the-application)  
-7. [Usage](#usage)  
-8. [Contribution](#contribution)  
-9. [License](#license)  
+7. [Usage](#usage)   
 
 ---
 
