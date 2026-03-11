@@ -1,6 +1,5 @@
-// ============================
-// server.js
-// ============================
+ 
+// server.js 
 
 require("dotenv").config();
 
@@ -14,11 +13,9 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 
-const app = express();
+const app = express(); 
 
-// ============================
-// Paths
-// ============================
+// Paths 
 const ROOT_DIR = path.join(__dirname, "..");
 const FRONT_END_DIR = path.join(ROOT_DIR, "FRONT_END");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
@@ -27,24 +24,18 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   console.log("📁 BACK_END/uploads/ folder created");
 }
-
-// ============================
-// JWT Secret — set in .env as JWT_SECRET
-// ============================
+ 
+// JWT Secret — set in .env as JWT_SECRET 
 const JWT_SECRET = process.env.JWT_SECRET || "shivshakti_super_secret_key_change_in_production";
-
-// ============================
-// Middleware
-// ============================
+ 
+// Middleware 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 app.use("/uploads", express.static(UPLOADS_DIR));
 app.use(express.static(FRONT_END_DIR));
-
-// ============================
-// MongoDB Connection
-// ============================
+ 
+// MongoDB Connection 
 const uri = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/event_startup";
 mongoose.connect(uri)
   .then(() => console.log("✅ MongoDB connected successfully"))
@@ -52,10 +43,8 @@ mongoose.connect(uri)
     console.error("❌ MongoDB connection error:", err.message);
     console.log("➡️  Make sure MongoDB is running: mongod");
   });
-
-// ============================
-// Mongoose Schemas
-// ============================
+ 
+// Mongoose Schemas 
 const adminSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   password: { type: String, required: true }, // bcrypt hashed
@@ -93,11 +82,9 @@ const bookingSchema = new mongoose.Schema({
   status: { type: String, default: "Pending" },
 }, { timestamps: true });
 const Booking = mongoose.model("Booking", bookingSchema);
-
-// ============================
+ 
 // JWT Auth Middleware
-// Protects all admin routes
-// ============================
+// Protects all admin routes 
 function verifyToken(req, res, next) {
   const token = req.cookies.adminToken;
   if (!token) {
@@ -111,10 +98,8 @@ function verifyToken(req, res, next) {
     return res.status(401).json({ success: false, message: "Session expired. Please login again." });
   }
 }
-
-// ============================
-// Admin Login Route
-// ============================
+ 
+// Admin Login Route 
 app.post("/admin/login", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -157,26 +142,20 @@ app.post("/admin/login", async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
-
-// ============================
-// Admin Logout Route
-// ============================
+ 
+// Admin Logout Route 
 app.post("/admin/logout", (req, res) => {
   res.clearCookie("adminToken");
   res.json({ success: true, message: "Logged out successfully" });
 });
-
-// ============================
+ 
 // Auth Check Route
-// Frontend calls this on dashboard load to verify session
-// ============================
+// Frontend calls this on dashboard load to verify session 
 app.get("/admin/check", verifyToken, (req, res) => {
   res.json({ success: true, username: req.admin.username });
 });
-
-// ============================
-// Multer Setup
-// ============================
+ 
+// Multer Setup 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname)),
@@ -191,10 +170,8 @@ const fileFilter = (req, file, cb) => {
 };
 
 const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
-
-// ============================
-// API Routes
-// ============================
+ 
+// API Routes 
 
 // Health Check
 app.get("/api/health", (req, res) => {
@@ -359,18 +336,14 @@ app.delete("/api/work/:id", verifyToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// ============================
-// Global Error Handler
-// ============================
+ 
+// Global Error Handler 
 app.use((err, req, res, next) => {
   console.error("Server Error:", err.message);
   res.status(500).json({ error: err.message || "Internal Server Error" });
 });
-
-// ============================
-// Start Server
-// ============================
+ 
+// Start Server 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server started on port ${PORT}`);

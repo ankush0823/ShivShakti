@@ -1,16 +1,10 @@
-// ============================
-// create-admin.js
-// Run this ONCE to create your admin account in MongoDB
-// Command: node create-admin.js
-// ============================
+ 
 
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
-
-// --- Change these before running ---
+ 
 const ADMIN_USERNAME = "admin";
-const ADMIN_PASSWORD = "ShivShakti@2025"; // Change to your desired password
-// -----------------------------------
+const ADMIN_PASSWORD = "ShivShakti@2025";   
 
 const adminSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
