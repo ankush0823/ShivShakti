@@ -586,6 +586,7 @@ app.delete("/admin/delete-account", async (req, res) => {
         return res.status(401).json({ success: false, message: "Incorrect password." });
       }
     } else {
+      
       // Fallback to env
       if (password !== (process.env.ADMIN_PASS || "ShivShakti@2025")) {
         return res.status(401).json({ success: false, message: "Incorrect password." });
