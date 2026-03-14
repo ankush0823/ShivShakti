@@ -1,3 +1,6 @@
+const cloudinary = require("cloudinary").v2;
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+
 
 require("dotenv").config();
  
@@ -13,6 +16,15 @@ const nodemailer = require("nodemailer");
 const crypto = require("crypto");
 
 const app = express();
+
+
+// Cloudinary Config
+// ============================
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
  
 // Middleware 
 app.use(cors());
@@ -85,11 +97,6 @@ const reviewSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Review = mongoose.model("Review", reviewSchema);
  
-// Multer Image Upload 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => cb(null, Date.now() + "-" + Math.round(Math.random() * 1e6) + path.extname(file.originalname)),
-});
 
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif|webp/;
@@ -98,8 +105,21 @@ const fileFilter = (req, file, cb) => {
   if (isValid) cb(null, true);
   else cb(new Error("Only image files are allowed!"), false);
 };
+ 
+// Multer + Cloudinary Storage 
+const cloudStorage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "shiv-shakti",
+    allowed_formats: ["jpg", "jpeg", "png", "gif", "webp"],
+    transformation: [{ quality: "auto", fetch_format: "auto" }],
+  },
+});
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({
+  storage: cloudStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
  
 // Admin Auth 
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
@@ -222,7 +242,7 @@ app.post("/api/specialization", upload.single("image"), async (req, res) => {
     const card = new SpecializationCard({
       title,
       description,
-      imageUrl: `/uploads/${req.file.filename}`,
+      imageUrl: req.file.path, 
       images: []
     });
     await card.save();
@@ -264,7 +284,7 @@ app.post("/api/specialization/:id/images", upload.array("images", 20), async (re
       return res.status(400).json({ error: "No images uploaded" });
     }
 
-    const newImageUrls = req.files.map(f => `/uploads/${f.filename}`);
+    const newImageUrls = req.files.map(f => f.path);
     card.images.push(...newImageUrls);
     await card.save();
 
@@ -285,30 +305,13 @@ app.delete("/api/specialization/:id/images", async (req, res) => {
     card.images = card.images.filter(img => img !== imageUrl);
     await card.save();
 
-    // Delete file from disk
-    const filePath = path.join(__dirname, imageUrl);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-
     res.json(card);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
-// Delete entire specialization card
 app.delete("/api/specialization/:id", async (req, res) => {
   try {
-    const card = await SpecializationCard.findById(req.params.id);
-    if (card) { 
-      if (card.imageUrl) {
-        const f = path.join(__dirname, card.imageUrl);
-        if (fs.existsSync(f)) fs.unlinkSync(f);
-      }
-      card.images.forEach(img => {
-        const f = path.join(__dirname, img);
-        if (fs.existsSync(f)) fs.unlinkSync(f);
-      });
-    }
     await SpecializationCard.findByIdAndDelete(req.params.id);
     res.json({ message: "Card deleted successfully" });
   } catch (err) {
@@ -586,7 +589,7 @@ app.delete("/admin/delete-account", async (req, res) => {
         return res.status(401).json({ success: false, message: "Incorrect password." });
       }
     } else {
-      
+
       // Fallback to env
       if (password !== (process.env.ADMIN_PASS || "ShivShakti@2025")) {
         return res.status(401).json({ success: false, message: "Incorrect password." });
