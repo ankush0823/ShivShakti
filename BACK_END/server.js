@@ -1,44 +1,33 @@
- 
 
 require("dotenv").config();
+ 
+// server.js — COMPLETE UPDATED VERSION 
 
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
 const path = require("path");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
-const cookieParser = require("cookie-parser");
-const crypto = require("crypto");
+const fs = require("fs");
 const nodemailer = require("nodemailer");
-const cloudinary = require("cloudinary").v2;
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const crypto = require("crypto");
 
 const app = express();
-
-// ============================
-// Cloudinary Config
-// ============================
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-// Paths
-const ROOT_DIR = path.join(__dirname, "..");
-const FRONT_END_DIR = path.join(ROOT_DIR, "FRONT_END");
-
-const JWT_SECRET = process.env.JWT_SECRET || "shivshakti_super_secret_key_change_in_production";
-
-// Middleware
-app.use(cors({ origin: true, credentials: true }));
+ 
+// Middleware 
+app.use(cors());
 app.use(express.json());
-app.use(cookieParser());
-app.use(express.static(FRONT_END_DIR));
-
-// MongoDB Connection
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use(express.static(path.join(__dirname, "../FRONT_END")));
+ 
+// Auto-create uploads folder 
+const uploadDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+  console.log("📁 uploads/ folder created");
+}
+ 
+// MongoDB Connection 
 const uri = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/event_startup";
 mongoose.connect(uri)
   .then(() => console.log("✅ MongoDB connected successfully"))
@@ -46,352 +35,47 @@ mongoose.connect(uri)
     console.error("❌ MongoDB connection error:", err.message);
     console.log("➡️  Make sure MongoDB is running: mongod");
   });
+ 
+// Mongoose Schemas 
 
-// ============================
-// Mongoose Schemas
-// ============================
-const adminSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  email:    { type: String, required: true, unique: true },
-  resetToken:       String,
-  resetTokenExpiry: Date,
-}, { timestamps: true });
-const Admin = mongoose.model("Admin", adminSchema);
-
+// UPDATED: Specialization now has an images array
 const specializationSchema = new mongoose.Schema({
-  title: String, description: String, imageUrl: String, publicId: String,
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  imageUrl: String,        
+  images: [String],         
 }, { timestamps: true });
 const SpecializationCard = mongoose.model("SpecializationCard", specializationSchema);
 
+// Work/Gallery schema kept for backward compat but no longer used on frontend
 const workSchema = new mongoose.Schema({
-  imageUrl: String, publicId: String,
+  imageUrl: String,
 }, { timestamps: true });
 const WorkCard = mongoose.model("WorkCard", workSchema);
 
+// Enquiry
 const enquirySchema = new mongoose.Schema({
-  name: { type: String, required: true }, email: { type: String },
-  mobile: String, message: { type: String, required: true },
+  name: { type: String, required: true },
+  email: String,
+  mobile: String,
+  message: { type: String, required: true },
 }, { timestamps: true });
 const Enquiry = mongoose.model("Enquiry", enquirySchema);
 
+// Booking
 const bookingSchema = new mongoose.Schema({
-  name: { type: String, required: true }, phone: { type: String, required: true },
-  email: String, date: { type: String, required: true },
-  eventType: { type: String, required: true }, location: { type: String, required: true },
-  details: String, status: { type: String, default: "Pending" },
+  name: { type: String, required: true },
+  phone: { type: String, required: true },
+  email: String,
+  date: { type: String, required: true },
+  eventType: { type: String, required: true },
+  location: { type: String, required: true },
+  details: String,
+  status: { type: String, default: "Pending" },
 }, { timestamps: true });
 const Booking = mongoose.model("Booking", bookingSchema);
 
-// ============================
-// Nodemailer (Gmail)
-// ============================
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-// ============================
-// JWT Middleware
-// ============================
-function verifyToken(req, res, next) {
-  const token = req.cookies.adminToken;
-  if (!token) return res.status(401).json({ success: false, message: "Unauthorized. Please login." });
-  try {
-    req.admin = jwt.verify(token, JWT_SECRET);
-    next();
-  } catch {
-    return res.status(401).json({ success: false, message: "Session expired. Please login again." });
-  }
-}
-
-// ============================
-// Multer + Cloudinary Storage
-// ============================
-const cloudinaryStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: "shivshakti",
-    allowed_formats: ["jpg", "jpeg", "png", "gif", "webp"],
-  },
-});
-
-const fileFilter = (req, file, cb) => {
-  const allowed = /jpeg|jpg|png|gif|webp/;
-  allowed.test(path.extname(file.originalname).toLowerCase()) && allowed.test(file.mimetype)
-    ? cb(null, true) : cb(new Error("Only image files allowed!"), false);
-};
-
-const upload = multer({
-  storage: cloudinaryStorage,
-  fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 },
-});
-
-// ============================
-// API Routes
-// ============================
-app.get("/api/health", (req, res) => {
-  res.json({ message: "Server running", database: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected", timestamp: new Date() });
-});
-
-// --- Admin Exists ---
-app.get("/admin/exists", async (req, res) => {
-  try {
-    const count = await Admin.countDocuments();
-    res.json({ exists: count > 0 });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// --- Register ---
-app.post("/admin/register", async (req, res) => {
-  try {
-    const count = await Admin.countDocuments();
-    if (count > 0) {
-      return res.status(403).json({ success: false, message: "Registration is closed. An admin already exists." });
-    }
-    const { username, email, password } = req.body;
-    if (!username || !email || !password)
-      return res.status(400).json({ success: false, message: "All fields are required." });
-    if (password.length < 6)
-      return res.status(400).json({ success: false, message: "Password must be at least 6 characters." });
-    const hashedPassword = await bcrypt.hash(password, 12);
-    const admin = new Admin({ username, email, password: hashedPassword });
-    await admin.save();
-    res.json({ success: true, message: "Admin account created successfully!" });
-  } catch (err) {
-    if (err.code === 11000)
-      return res.status(400).json({ success: false, message: "Username or email already exists." });
-    res.status(500).json({ success: false, message: "Server error." });
-  }
-});
-
-// --- Login ---
-app.post("/admin/login", async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    if (!username || !password)
-      return res.status(400).json({ success: false, message: "Username and password required." });
-    const admin = await Admin.findOne({ username });
-    if (!admin) return res.status(401).json({ success: false, message: "Invalid credentials." });
-    const isMatch = await bcrypt.compare(password, admin.password);
-    if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials." });
-    const token = jwt.sign({ id: admin._id, username: admin.username }, JWT_SECRET, { expiresIn: "8h" });
-    res.cookie("adminToken", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 8 * 60 * 60 * 1000,
-    });
-    res.json({ success: true, message: "Login successful." });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server error." });
-  }
-});
-
-// --- Logout ---
-app.post("/admin/logout", (req, res) => {
-  res.clearCookie("adminToken");
-  res.json({ success: true, message: "Logged out successfully." });
-});
-
-// --- Auth Check ---
-app.get("/admin/check", verifyToken, (req, res) => {
-  res.json({ success: true, username: req.admin.username });
-});
-
-// --- Forgot Password ---
-app.post("/admin/forgot-password", async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ success: false, message: "Email is required." });
-    const admin = await Admin.findOne({ email });
-    if (!admin) return res.json({ success: true, message: "If this email exists, a reset link has been sent." });
-    const plainToken = crypto.randomBytes(32).toString("hex");
-    admin.resetToken = crypto.createHash("sha256").update(plainToken).digest("hex");
-    admin.resetTokenExpiry = new Date(Date.now() + 15 * 60 * 1000);
-    await admin.save();
-    const resetUrl = `${process.env.BASE_URL || "http://localhost:3000"}/reset-password.html?token=${plainToken}`;
-    await transporter.sendMail({
-      from: `"Shiv Shakti Admin" <${process.env.EMAIL_USER}>`,
-      to: admin.email,
-      subject: "Password Reset Request",
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #eee;border-radius:8px;">
-          <h2 style="color:#333;">Password Reset Request</h2>
-          <p style="color:#555;">Hello <strong>${admin.username}</strong>,</p>
-          <p style="color:#555;">Click below to reset your password. Link expires in <strong>15 minutes</strong>.</p>
-          <a href="${resetUrl}" style="display:inline-block;margin:20px 0;padding:12px 28px;background:#c9922a;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;">Reset Password</a>
-          <p style="color:#999;font-size:13px;">If you didn't request this, ignore this email.</p>
-          <hr style="border:none;border-top:1px solid #eee;"/>
-          <p style="color:#bbb;font-size:12px;">Shiv Shakti Decoration Admin Panel</p>
-        </div>
-      `,
-    });
-    res.json({ success: true, message: "If this email exists, a reset link has been sent." });
-  } catch (err) {
-    console.error("Forgot password error:", err.message);
-    res.status(500).json({ success: false, message: "Failed to send email. Check EMAIL_USER and EMAIL_PASS in .env" });
-  }
-});
-
-// --- Verify Reset Token ---
-app.get("/admin/reset-password/:token", async (req, res) => {
-  try {
-    const hashedToken = crypto.createHash("sha256").update(req.params.token).digest("hex");
-    const admin = await Admin.findOne({ resetToken: hashedToken, resetTokenExpiry: { $gt: new Date() } });
-    if (!admin) return res.status(400).json({ success: false, message: "Invalid or expired reset link." });
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server error." });
-  }
-});
-
-// --- Reset Password ---
-app.post("/admin/reset-password/:token", async (req, res) => {
-  try {
-    const { newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6)
-      return res.status(400).json({ success: false, message: "Password must be at least 6 characters." });
-    const hashedToken = crypto.createHash("sha256").update(req.params.token).digest("hex");
-    const admin = await Admin.findOne({ resetToken: hashedToken, resetTokenExpiry: { $gt: new Date() } });
-    if (!admin) return res.status(400).json({ success: false, message: "Invalid or expired reset link." });
-    admin.password = await bcrypt.hash(newPassword, 12);
-    admin.resetToken = undefined;
-    admin.resetTokenExpiry = undefined;
-    await admin.save();
-    res.json({ success: true, message: "Password reset successful! You can now login." });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server error." });
-  }
-});
-
-// --- Change Password ---
-app.post("/admin/change-password", verifyToken, async (req, res) => {
-  try {
-    const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword)
-      return res.status(400).json({ success: false, message: "All fields are required." });
-    if (newPassword.length < 6)
-      return res.status(400).json({ success: false, message: "New password must be at least 6 characters." });
-    const admin = await Admin.findById(req.admin.id);
-    const isMatch = await bcrypt.compare(currentPassword, admin.password);
-    if (!isMatch) return res.status(401).json({ success: false, message: "Current password is incorrect." });
-    admin.password = await bcrypt.hash(newPassword, 12);
-    await admin.save();
-    res.json({ success: true, message: "Password updated successfully!" });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server error." });
-  }
-});
-
-// --- Delete Account ---
-app.delete("/admin/delete-account", verifyToken, async (req, res) => {
-  try {
-    await Admin.findByIdAndDelete(req.admin.id);
-    res.clearCookie("adminToken");
-    res.json({ success: true, message: "Account deleted successfully." });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server error." });
-  }
-});
-
-// --- Enquiries ---
-app.post("/enquiry", async (req, res) => {
-  try {
-    const { name, email, mobile, message } = req.body;
-    if (!name || !message ) return res.status(400).json({ message: "Name and message required." });
-    await new Enquiry({ name, email, mobile, message }).save();
-    res.json({ message: "Enquiry submitted successfully." });
-  } catch (err) { res.status(500).json({ message: "Server error." }); }
-});
-app.get("/enquiries", verifyToken, async (req, res) => {
-  try { res.json(await Enquiry.find().sort({ createdAt: -1 })); } catch (err) { res.status(500).json({ error: err.message }); }
-});
-app.delete("/enquiries/:id", verifyToken, async (req, res) => {
-  try { await Enquiry.findByIdAndDelete(req.params.id); res.json({ message: "Deleted." }); } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// --- Bookings ---
-app.post("/booking", async (req, res) => {
-  try {
-    const { name, phone, date, eventType, location } = req.body;
-    if (!name || !phone || !date || !eventType || !location) return res.status(400).json({ message: "Required fields missing." });
-    await new Booking(req.body).save();
-    res.json({ message: "Booking submitted successfully." });
-  } catch (err) { res.status(500).json({ message: "Server error." }); }
-});
-app.get("/bookings", verifyToken, async (req, res) => {
-  try { res.json(await Booking.find().sort({ createdAt: -1 })); } catch (err) { res.status(500).json({ error: err.message }); }
-});
-app.patch("/bookings/:id/status", verifyToken, async (req, res) => {
-  try { res.json(await Booking.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true })); } catch (err) { res.status(500).json({ error: err.message }); }
-});
-app.delete("/bookings/:id", verifyToken, async (req, res) => {
-  try { await Booking.findByIdAndDelete(req.params.id); res.json({ message: "Deleted." }); } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// --- Specialization Cards ---
-app.post("/api/specialization", verifyToken, (req, res) => {
-  upload.single("image")(req, res, async (err) => {
-    if (err) return res.status(400).json({ error: err.message });
-    try {
-      const { title, description } = req.body;
-      if (!title || !description) return res.status(400).json({ error: "Title and description required." });
-      if (!req.file) return res.status(400).json({ error: "Image required." });
-      res.status(201).json(await new SpecializationCard({
-        title, description,
-        imageUrl: req.file.path,
-        publicId: req.file.filename,
-      }).save());
-    } catch (err) { res.status(500).json({ error: err.message }); }
-  });
-});
-app.get("/api/specialization", async (req, res) => {
-  try { res.json(await SpecializationCard.find().sort({ createdAt: -1 })); } catch (err) { res.status(500).json({ error: err.message }); }
-});
-app.delete("/api/specialization/:id", verifyToken, async (req, res) => {
-  try {
-    const card = await SpecializationCard.findById(req.params.id);
-    if (card?.publicId) await cloudinary.uploader.destroy(card.publicId);
-    await SpecializationCard.findByIdAndDelete(req.params.id);
-    res.json({ message: "Deleted." });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// --- Work / Gallery Cards ---
-app.post("/api/work", verifyToken, (req, res) => {
-  upload.single("image")(req, res, async (err) => {
-    if (err) return res.status(400).json({ error: err.message });
-    try {
-      if (!req.file) return res.status(400).json({ error: "Image required." });
-      res.status(201).json(await new WorkCard({
-        imageUrl: req.file.path,
-        publicId: req.file.filename,
-      }).save());
-    } catch (err) { res.status(500).json({ error: err.message }); }
-  });
-});
-app.get("/api/work", async (req, res) => {
-  try { res.json(await WorkCard.find().sort({ createdAt: -1 })); } catch (err) { res.status(500).json({ error: err.message }); }
-});
-app.delete("/api/work/:id", verifyToken, async (req, res) => {
-  try {
-    const card = await WorkCard.findById(req.params.id);
-    if (card?.publicId) await cloudinary.uploader.destroy(card.publicId);
-    await WorkCard.findByIdAndDelete(req.params.id);
-    res.json({ message: "Deleted." });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-
-// Review Schema
-// ============================
+// Review
 const reviewSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: String,
@@ -400,9 +84,269 @@ const reviewSchema = new mongoose.Schema({
   approved: { type: Boolean, default: false },
 }, { timestamps: true });
 const Review = mongoose.model("Review", reviewSchema);
-  
  
-// Submit new review
+// Multer Image Upload 
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) => cb(null, Date.now() + "-" + Math.round(Math.random() * 1e6) + path.extname(file.originalname)),
+});
+
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif|webp/;
+  const isValid = allowedTypes.test(path.extname(file.originalname).toLowerCase())
+    && allowedTypes.test(file.mimetype);
+  if (isValid) cb(null, true);
+  else cb(new Error("Only image files are allowed!"), false);
+};
+
+const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+ 
+// Admin Auth 
+const ADMIN_USER = process.env.ADMIN_USER || "admin";
+const ADMIN_PASS = process.env.ADMIN_PASS || "ShivShakti@2025";
+
+app.post("/admin/login", async (req, res) => {
+  const { username, password } = req.body;
+
+  try {
+    // First check database (registered account)
+    const admin = await Admin.findOne({ username, password });
+    if (admin) {
+      return res.json({ success: true, message: "Login successful" });
+    }
+
+    // Fallback to env variables (default account)
+    if (username === ADMIN_USER && password === ADMIN_PASS) {
+      return res.json({ success: true, message: "Login successful" });
+    }
+
+    res.status(401).json({ success: false, message: "Invalid credentials" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+ 
+// Health Check 
+app.get("/api/health", (req, res) => {
+  const dbStatus = mongoose.connection.readyState === 1 ? "Connected" : "Disconnected";
+  res.json({ message: "Server running", database: dbStatus, timestamp: new Date() });
+});
+ 
+// Enquiries 
+app.post("/enquiry", async (req, res) => {
+  try {
+    const { name, email, mobile, message } = req.body;
+    if (!name || !message) {
+      return res.status(400).json({ message: "Name and message are required" });
+    }
+    const enquiry = new Enquiry({ name, email, mobile, message });
+    await enquiry.save();
+    res.json({ message: "Enquiry submitted successfully" });
+  } catch (err) {
+    console.error("Enquiry POST error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.get("/enquiries", async (req, res) => {
+  try {
+    const data = await Enquiry.find().sort({ createdAt: -1 });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/enquiries/:id", async (req, res) => {
+  try {
+    await Enquiry.findByIdAndDelete(req.params.id);
+    res.json({ message: "Enquiry deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+ 
+// Bookings 
+app.post("/booking", async (req, res) => {
+  try {
+    const { name, phone, date, eventType, location } = req.body;
+    if (!name || !phone || !date || !eventType || !location) {
+      return res.status(400).json({ message: "Required fields missing" });
+    }
+    const booking = new Booking(req.body);
+    await booking.save();
+    res.json({ message: "Booking submitted successfully" });
+  } catch (err) {
+    console.error("Booking POST error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.get("/bookings", async (req, res) => {
+  try {
+    const data = await Booking.find().sort({ createdAt: -1 });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/bookings/:id/status", async (req, res) => {
+  try {
+    const { status } = req.body;
+    const booking = await Booking.findByIdAndUpdate(req.params.id, { status }, { new: true });
+    res.json(booking);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/bookings/:id", async (req, res) => {
+  try {
+    await Booking.findByIdAndDelete(req.params.id);
+    res.json({ message: "Booking deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+ 
+// Specialization Cards  
+
+// Create new specialization card (with cover image)
+app.post("/api/specialization", upload.single("image"), async (req, res) => {
+  try {
+    const { title, description } = req.body;
+    if (!title || !description) return res.status(400).json({ error: "Title and description required" });
+    if (!req.file) return res.status(400).json({ error: "Cover image is required" });
+
+    const card = new SpecializationCard({
+      title,
+      description,
+      imageUrl: `/uploads/${req.file.filename}`,
+      images: []
+    });
+    await card.save();
+    res.status(201).json(card);
+  } catch (err) {
+    console.error("Specialization POST error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get all specialization cards
+app.get("/api/specialization", async (req, res) => {
+  try {
+    const cards = await SpecializationCard.find().sort({ createdAt: -1 });
+    res.json(cards);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get single specialization card (with all images)
+app.get("/api/specialization/:id", async (req, res) => {
+  try {
+    const card = await SpecializationCard.findById(req.params.id);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    res.json(card);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add gallery images to a specialization (multiple upload)
+app.post("/api/specialization/:id/images", upload.array("images", 20), async (req, res) => {
+  try {
+    const card = await SpecializationCard.findById(req.params.id);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: "No images uploaded" });
+    }
+
+    const newImageUrls = req.files.map(f => `/uploads/${f.filename}`);
+    card.images.push(...newImageUrls);
+    await card.save();
+
+    res.json(card);
+  } catch (err) {
+    console.error("Add images error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a single gallery image from specialization
+app.delete("/api/specialization/:id/images", async (req, res) => {
+  try {
+    const { imageUrl } = req.body;
+    const card = await SpecializationCard.findById(req.params.id);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+
+    card.images = card.images.filter(img => img !== imageUrl);
+    await card.save();
+
+    // Delete file from disk
+    const filePath = path.join(__dirname, imageUrl);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+    res.json(card);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete entire specialization card
+app.delete("/api/specialization/:id", async (req, res) => {
+  try {
+    const card = await SpecializationCard.findById(req.params.id);
+    if (card) { 
+      if (card.imageUrl) {
+        const f = path.join(__dirname, card.imageUrl);
+        if (fs.existsSync(f)) fs.unlinkSync(f);
+      }
+      card.images.forEach(img => {
+        const f = path.join(__dirname, img);
+        if (fs.existsSync(f)) fs.unlinkSync(f);
+      });
+    }
+    await SpecializationCard.findByIdAndDelete(req.params.id);
+    res.json({ message: "Card deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+ 
+// Work / Gallery (kept for backward compat) 
+app.post("/api/work", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "Image is required" });
+    const card = new WorkCard({ imageUrl: `/uploads/${req.file.filename}` });
+    await card.save();
+    res.status(201).json(card);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/work", async (req, res) => {
+  try {
+    const cards = await WorkCard.find().sort({ createdAt: -1 });
+    res.json(cards);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/work/:id", async (req, res) => {
+  try {
+    await WorkCard.findByIdAndDelete(req.params.id);
+    res.json({ message: "Card deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+ 
+// Reviews 
 app.post("/reviews", async (req, res) => {
   try {
     const { name, email, rating, message } = req.body;
@@ -417,8 +361,7 @@ app.post("/reviews", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
- 
-// Get only approved reviews for public website
+
 app.get("/reviews", async (req, res) => {
   try {
     const data = await Review.find({ approved: true }).sort({ createdAt: -1 });
@@ -427,8 +370,7 @@ app.get("/reviews", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-  
-// Get ALL reviews (for admin dashboard)
+
 app.get("/admin/reviews", async (req, res) => {
   try {
     const data = await Review.find().sort({ createdAt: -1 });
@@ -437,23 +379,17 @@ app.get("/admin/reviews", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
- 
-// Approve / Unapprove a review
+
 app.patch("/admin/reviews/:id/approve", async (req, res) => {
   try {
     const { approved } = req.body;
-    const review = await Review.findByIdAndUpdate(
-      req.params.id,
-      { approved },
-      { new: true }
-    );
+    const review = await Review.findByIdAndUpdate(req.params.id, { approved }, { new: true });
     res.json(review);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
- 
-// Delete a review
+
 app.delete("/admin/reviews/:id", async (req, res) => {
   try {
     await Review.findByIdAndDelete(req.params.id);
@@ -462,20 +398,213 @@ app.delete("/admin/reviews/:id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-// ============================
-// Global Error Handler
-// ============================
+
+ 
+// Password Reset 
+const resetTokenSchema = new mongoose.Schema({
+  token: { type: String, required: true },
+  expiresAt: { type: Date, required: true },
+});
+const ResetToken = mongoose.model("ResetToken", resetTokenSchema);
+
+// Email transporter
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.ADMIN_EMAIL,
+    pass: process.env.ADMIN_EMAIL_PASS,
+  },
+});
+
+// Forgot Password — send reset link
+app.post("/admin/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    // Check if email matches admin email
+    if (email !== process.env.ADMIN_EMAIL) {
+      return res.status(400).json({ success: false, message: "Email not found." });
+    }
+
+    // Delete any old tokens
+    await ResetToken.deleteMany({});
+
+    // Generate token
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 30);  
+
+    await new ResetToken({ token, expiresAt }).save();
+
+    const resetUrl = `${process.env.APP_URL}/reset-password.html?token=${token}`;
+
+    // Send email
+    await transporter.sendMail({
+      from: `"Shiv Shakti Admin" <${process.env.ADMIN_EMAIL}>`,
+      to: email,
+      subject: "Password Reset Link — Shiv Shakti",
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#fdf8f2;border-radius:12px;">
+          <h2 style="color:#1a1410;">Password Reset Request</h2>
+          <p style="color:#555;margin:16px 0;">Click the button below to reset your admin password. This link expires in <strong>30 minutes</strong>.</p>
+          <a href="${resetUrl}"
+            style="display:inline-block;padding:13px 28px;background:linear-gradient(135deg,#c9922a,#e8b84b);color:#fff;text-decoration:none;border-radius:8px;font-weight:600;margin:16px 0;">
+            Reset Password
+          </a>
+          <p style="color:#aaa;font-size:12px;margin-top:24px;">If you didn't request this, ignore this email.</p>
+        </div>
+      `,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Forgot password error:", err.message);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// Verify reset token
+app.get("/admin/reset-password/:token", async (req, res) => {
+  try {
+    const record = await ResetToken.findOne({ token: req.params.token });
+    if (!record || record.expiresAt < new Date()) {
+      return res.status(400).json({ valid: false, message: "Token expired or invalid." });
+    }
+    res.json({ valid: true });
+  } catch (err) {
+    res.status(500).json({ valid: false, message: "Server error." });
+  }
+});
+
+// Reset Password — save new password
+app.post("/admin/reset-password", async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    const record = await ResetToken.findOne({ token });
+    if (!record || record.expiresAt < new Date()) {
+      return res.status(400).json({ success: false, message: "Token expired or invalid." });
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: "Password must be at least 6 characters." });
+    }
+
+    // Update the in-memory admin password for this session
+    // For permanent change, update your ADMIN_PASS env variable on Render
+    process.env.ADMIN_PASS = newPassword;
+
+    // Delete used token
+    await ResetToken.deleteMany({});
+
+    res.json({ success: true, message: "Password reset successfully!" });
+  } catch (err) {
+    console.error("Reset password error:", err.message);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+
+
+// Admin schema to store credentials in DB
+const adminSchema = new mongoose.Schema({
+  username: { type: String, required: true },
+  email: { type: String, required: true },
+  password: { type: String, required: true },
+}, { timestamps: true });
+const Admin = mongoose.model("Admin", adminSchema);
+
+// Check if admin exists
+app.get("/admin/exists", async (req, res) => {
+  try {
+    const admin = await Admin.findOne();
+    res.json({ exists: !!admin });
+  } catch (err) {
+    res.status(500).json({ exists: false });
+  }
+});
+
+// Register admin
+app.post("/admin/register", async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ success: false, message: "All fields required." });
+    }
+    const existing = await Admin.findOne();
+    if (existing) {
+      return res.status(403).json({ success: false, message: "Admin already exists." });
+    }
+    await new Admin({ username, email, password }).save();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// Change password
+app.post("/admin/change-password", async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "All fields required." });
+    }
+
+    // Check database first
+    const admin = await Admin.findOne();
+    if (admin) {
+      if (currentPassword !== admin.password) {
+        return res.status(401).json({ success: false, message: "Current password is incorrect." });
+      }
+      await Admin.findByIdAndUpdate(admin._id, { password: newPassword });
+    } else {
+      // Fallback to env
+      if (currentPassword !== (process.env.ADMIN_PASS || "ShivShakti@2025")) {
+        return res.status(401).json({ success: false, message: "Current password is incorrect." });
+      }
+      process.env.ADMIN_PASS = newPassword;
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: "Password must be at least 6 characters." });
+    }
+
+    res.json({ success: true, message: "Password changed successfully!" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// Delete admin account
+app.delete("/admin/delete-account", async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    // Check database first
+    const admin = await Admin.findOne();
+    if (admin) {
+      if (password !== admin.password) {
+        return res.status(401).json({ success: false, message: "Incorrect password." });
+      }
+    } else {
+      // Fallback to env
+      if (password !== (process.env.ADMIN_PASS || "ShivShakti@2025")) {
+        return res.status(401).json({ success: false, message: "Incorrect password." });
+      }
+    }
+
+    await Admin.deleteMany({});
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+ 
+// Global Error Handler  
 app.use((err, req, res, next) => {
   console.error("Server Error:", err.message);
   res.status(500).json({ error: err.message || "Internal Server Error" });
 });
-
-// ============================
-// Start Server
-// ============================
+ 
+// Start Server 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server started on port ${PORT}`);
-  console.log(`🌐 Open: http://localhost:${PORT}`);
-  console.log(`📁 Serving frontend from: ${FRONT_END_DIR}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server started on port ${PORT}`));
