@@ -440,7 +440,7 @@ app.post("/admin/forgot-password", async (req, res) => {
 
     const resetUrl = `${process.env.BASE_URL}/reset-password.html?token=${token}`;
 
-    // Send email
+    // Send email reset link
     await transporter.sendMail({
       from: `"Shiv Shakti Admin" <${process.env.ADMIN_EMAIL}>`,
       to: email,
