@@ -395,17 +395,20 @@ const resetTokenSchema = new mongoose.Schema({
   expiresAt: { type: Date, required: true },
 });
 const ResetToken = mongoose.model("ResetToken", resetTokenSchema);
-
-// ✅ FIXED: explicit host + port + family:4 to force IPv4 on Render
+ 
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
+  port: 587,
+  secure: false,
+  requireTLS: true,
   family: 4,
   auth: {
     user: process.env.ADMIN_EMAIL,
     pass: process.env.ADMIN_EMAIL_PASS,
   },
+  tls: {
+    rejectUnauthorized: false
+  }
 });
 
 // Verify transporter on startup — check Render logs for result
