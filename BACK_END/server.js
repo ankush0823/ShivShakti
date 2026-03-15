@@ -412,8 +412,11 @@ const ResetToken = mongoose.model("ResetToken", resetTokenSchema);
 
 // Email transporter
 const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
+  host: "smtp.gmail.com",   
+  port: 465,
+  secure: true,              
+  family: 4,   
+  auth: {             
     user: process.env.ADMIN_EMAIL,
     pass: process.env.ADMIN_EMAIL_PASS,
   },
