@@ -11,7 +11,6 @@ const mongoose = require("mongoose");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const nodemailer = require("nodemailer");
 const crypto = require("crypto");
 
 const app = express();
@@ -226,7 +225,6 @@ app.delete("/bookings/:id", async (req, res) => {
 });
 
 // Specialization Cards
-
 app.post("/api/specialization", upload.single("image"), async (req, res) => {
   try {
     const { title, description } = req.body;
@@ -388,37 +386,46 @@ app.delete("/admin/reviews/:id", async (req, res) => {
 });
 
 // ============================================================
-// Password Reset
+// Password Reset — using Resend HTTP API (no SMTP, works on Render free plan)
 // ============================================================
 const resetTokenSchema = new mongoose.Schema({
   token: { type: String, required: true },
   expiresAt: { type: Date, required: true },
 });
 const ResetToken = mongoose.model("ResetToken", resetTokenSchema);
- 
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  requireTLS: true,
-  family: 4,
-  auth: {
-    user: process.env.ADMIN_EMAIL,
-    pass: process.env.ADMIN_EMAIL_PASS,
-  },
-  tls: {
-    rejectUnauthorized: false
-  }
-});
 
-// Verify transporter on startup — check Render logs for result
-transporter.verify((error) => {
-  if (error) {
-    console.error("❌ Email transporter error:", error.message);
-  } else {
-    console.log("✅ Email transporter ready — Gmail SMTP connected");
+// ✅ Send email via Resend API (uses HTTPS port 443 — never blocked by Render)
+async function sendResetEmail(toEmail, resetUrl) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: "Shiv Shakti Admin <onboarding@resend.dev>",
+      to: toEmail,
+      subject: "Password Reset Link — Shiv Shakti",
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#fdf8f2;border-radius:12px;">
+          <h2 style="color:#1a1410;">Password Reset Request</h2>
+          <p style="color:#555;margin:16px 0;">Click the button below to reset your admin password. This link expires in <strong>30 minutes</strong>.</p>
+          <a href="${resetUrl}"
+            style="display:inline-block;padding:13px 28px;background:linear-gradient(135deg,#c9922a,#e8b84b);color:#fff;text-decoration:none;border-radius:8px;font-weight:600;margin:16px 0;">
+            Reset Password
+          </a>
+          <p style="color:#aaa;font-size:12px;margin-top:24px;">If you didn't request this, ignore this email.</p>
+        </div>
+      `,
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.message || "Resend API error");
   }
-});
+  return data;
+}
 
 // Forgot Password — send reset link
 app.post("/admin/forgot-password", async (req, res) => {
@@ -433,30 +440,16 @@ app.post("/admin/forgot-password", async (req, res) => {
 
     const token = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + 1000 * 60 * 30); // 30 mins
-
     await new ResetToken({ token, expiresAt }).save();
 
     const baseUrl = process.env.BASE_URL || process.env.APP_URL || "http://localhost:3000";
     const resetUrl = `${baseUrl}/reset-password.html?token=${token}`;
 
-    await transporter.sendMail({
-      from: `"Shiv Shakti Admin" <${process.env.ADMIN_EMAIL}>`,
-      to: email,
-      subject: "Password Reset Link — Shiv Shakti",
-      html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#fdf8f2;border-radius:12px;">
-          <h2 style="color:#1a1410;">Password Reset Request</h2>
-          <p style="color:#555;margin:16px 0;">Click the button below to reset your admin password. This link expires in <strong>30 minutes</strong>.</p>
-          <a href="${resetUrl}"
-            style="display:inline-block;padding:13px 28px;background:linear-gradient(135deg,#c9922a,#e8b84b);color:#fff;text-decoration:none;border-radius:8px;font-weight:600;margin:16px 0;">
-            Reset Password
-          </a>
-          <p style="color:#aaa;font-size:12px;margin-top:24px;">If you didn't request this, ignore this email.</p>
-        </div>
-      `,
-    });
+    await sendResetEmail(email, resetUrl);
 
+    console.log("✅ Password reset email sent to:", email);
     res.json({ success: true });
+
   } catch (err) {
     console.error("Forgot password error:", err.message);
     res.status(500).json({ success: false, message: "Failed to send email: " + err.message });
@@ -490,13 +483,11 @@ app.post("/admin/reset-password", async (req, res) => {
       return res.status(400).json({ success: false, message: "Password must be at least 6 characters." });
     }
 
-    // ✅ FIXED: Update password in DB if admin exists
+    // Update password in DB
     const admin = await Admin.findOne();
     if (admin) {
       await Admin.findByIdAndUpdate(admin._id, { password: newPassword });
     }
-
-    // Also update env for session fallback
     process.env.ADMIN_PASS = newPassword;
 
     await ResetToken.deleteMany({});
@@ -544,11 +535,9 @@ app.post("/admin/change-password", async (req, res) => {
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ success: false, message: "All fields required." });
     }
-
     if (newPassword.length < 6) {
       return res.status(400).json({ success: false, message: "Password must be at least 6 characters." });
     }
-
     const admin = await Admin.findOne();
     if (admin) {
       if (currentPassword !== admin.password) {
@@ -561,7 +550,6 @@ app.post("/admin/change-password", async (req, res) => {
       }
       process.env.ADMIN_PASS = newPassword;
     }
-
     res.json({ success: true, message: "Password changed successfully!" });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error." });
@@ -571,7 +559,6 @@ app.post("/admin/change-password", async (req, res) => {
 app.delete("/admin/delete-account", async (req, res) => {
   try {
     const { password } = req.body;
-
     const admin = await Admin.findOne();
     if (admin) {
       if (password !== admin.password) {
@@ -582,7 +569,6 @@ app.delete("/admin/delete-account", async (req, res) => {
         return res.status(401).json({ success: false, message: "Incorrect password." });
       }
     }
-
     await Admin.deleteMany({});
     res.json({ success: true });
   } catch (err) {
