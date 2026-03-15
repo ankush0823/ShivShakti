@@ -438,7 +438,7 @@ app.post("/admin/forgot-password", async (req, res) => {
 
     await new ResetToken({ token, expiresAt }).save();
 
-    const resetUrl = `${process.env.APP_URL}/reset-password.html?token=${token}`;
+    const resetUrl = `${process.env.BASE_URL}/reset-password.html?token=${token}`;
 
     // Send email
     await transporter.sendMail({
