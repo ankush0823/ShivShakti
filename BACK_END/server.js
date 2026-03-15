@@ -460,7 +460,7 @@ app.post("/admin/forgot-password", async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error("Forgot password error:", err.message);
+    console.error("Forgot password error:", err);
     res.status(500).json({ success: false, message: "Server error." });
   }
 });
